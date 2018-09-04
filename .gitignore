@@ -5,4 +5,4 @@
 .DS_Store
 /rankings/
 scrapers/test.py
-.idea/workspace.xml
+.idea/
