@@ -4,5 +4,6 @@
 .Ruserdata
 .DS_Store
 /rankings/
-scrapers/test.py
+test.py
 .idea/
+tmp.R
