@@ -1,0 +1,445 @@
+---
+---
+
+```{r message=FALSE, warning=FALSE}
+library(TopKLists)
+library(readr)
+library(stringr)
+library(dplyr)
+library(purrr)
+library(magrittr)
+library(rlist)
+library(tictoc)
+```
+
+# Replicate FantasyPros (2018)
+
+```{r}
+player_ranks <- function(rank_vector, players) {
+  rank_vector <- fix_ranks(rank_vector)
+  n <- max(rank_vector, na.rm=TRUE)
+  out <- players[order(rank_vector)]
+  return(head(out, n))
+}
+
+# call this to close gaps in ranks (e.g., c(1,2,NA,4) -> c(1,2,NA,3))
+fix_ranks <- function(rank_vector) {
+  return(rank(rank_vector, na.last="keep"))
+}
+```
+
+## Draft rankings
+
+```{r}
+path <- "./rankings/2018/draft/"
+
+all_files <- list.files(path)
+std <- all_files[str_detect(all_files, "_STD_") & !str_detect(all_files, "_0_")]
+ppr <- all_files[str_detect(all_files, "_PPR_") & !str_detect(all_files, "_0_")]
+half <- all_files[str_detect(all_files, "_HALF_") & !str_detect(all_files, "_0_")]
+
+complete.rank.list <- list()
+
+for (file in std) {
+  source.name <- str_split(file, "_") %>% 
+    map_chr(~ .x[3])
+  
+  df <- read_csv(paste0(path, file), col_types=cols())
+  
+  colnames(df)[5:ncol(df)] %<>%
+    paste(source.name, sep="_")
+  
+  tmp <- list()
+  experts <- colnames(df)[5:ncol(df)]
+  for (expert in experts) {
+    tmp %<>% list.append(player_ranks(pull(df, expert), df$Player))
+  }
+  names(tmp) <- experts
+  
+  complete.rank.list <- c(complete.rank.list, tmp)
+}
+```
+
+```{r}
+expert_df <- read_csv("./experts/2018/2018_expert_list_draft.csv", col_types=cols()) %>% 
+  mutate_at("checked", as.logical)
+
+checked_expert_df <- expert_df %>% 
+  filter(checked)
+
+all_fp_experts  <- with(expert_df, paste(Expert, Site, sep="_"))
+checked_experts <- with(checked_expert_df, paste(Expert, Site, sep="_"))
+
+all.rank.list <- complete.rank.list[names(complete.rank.list) %in% all_fp_experts]
+checked.rank.list <- complete.rank.list[names(complete.rank.list) %in% checked_experts]
+```
+
+```{r}
+tic()
+checked.MC <- MC(checked.rank.list)
+toc()
+
+# dir <- "./aggregation/2018/"
+# if (!dir.exists(dir)) { dir.create(dir) }
+# write_csv(checked.df, paste0(dir,"checked_experts_draft.csv"))
+```
+
+```{r}
+fp_consensus <- read_csv("./rankings/2018/draft/2018_0_FantasyPros consensus_ALL_STD_draft.csv",
+                         col_types=cols())
+
+checked.df <- data.frame(Player=checked.MC$MC3.TopK) %>% 
+  mutate_at("Player", as.character) %>% 
+  left_join(fp_consensus, by="Player") #%>% 
+  # mutate_at("Position", str_replace_all, ., "[:digit:]", "")
+
+checked.df$Position <- str_replace_all(checked.df$Position, "[:digit:]", "")
+
+checked.df <- checked.df %>% 
+  mutate(Rank = 1:n()) %>% 
+  group_by(Position) %>% 
+  mutate(prk = 1:n()) %>% 
+  ungroup() %>% 
+  rename(FP_Rank = `Staff Composite`) %>% 
+  mutate(diff = Rank - FP_Rank) %>% 
+  select(Rank, Player, Team, Position, prk, FP_Rank, diff)
+  
+dir <- "./aggregation/2018/"
+if (!dir.exists(dir)) { dir.create(dir) }
+write_csv(checked.df, paste0(dir,"checked_experts_draft.csv"))
+```
+
+```{r}
+tic()
+all.MC <- MC(all.rank.list)
+toc()
+all.df.orig <- data.frame(Player=all.MC$MC3.TopK)
+write_csv(all.df, "./aggregation/all_fp_experts_draft.csv")
+```
+
+```{r}
+all.df <- all.df.orig %>% 
+  mutate_at("Player", as.character) %>% 
+  left_join(fp_consensus, by="Player") #%>% 
+  # mutate_at("Position", str_replace_all, ., "[:digit:]", "")
+
+all.df$Position <- str_replace_all(all.df$Position, "[:digit:]", "")
+
+all.df <- all.df %>% 
+  mutate(Rank = 1:n()) %>% 
+  group_by(Position) %>% 
+  mutate(prk = 1:n()) %>% 
+  ungroup() %>% 
+  rename(`FP Rank` = `Staff Composite`) %>% 
+  mutate(diff = Rank - `FP Rank`) %>% 
+  select(Rank, Player, Team, Position, prk, `FP Rank`, diff)
+  
+write_csv(all.df, "./aggregation/all_fp_experts_draft.csv")
+```
+
+## Weekly ranking
+
+```{r}
+year <- 2018
+week <- 10
+path <- paste0("./rankings/", year, "/weekly/week", week, "/")
+
+all_files <- list.files(path)
+# split files by scoring type (exclude FantasyPros aggregated rankings -- source 0)
+std <- all_files[str_detect(all_files, "_STD_") & !str_detect(all_files, "_0_")]
+# QB, K, and D/ST don't have different PPR rankings, so include the STD files for those positions
+ppr <- all_files[(str_detect(all_files, "_PPR_") | 
+                    str_detect(all_files, "_QB_") |
+                    str_detect(all_files, "_K_") |
+                    str_detect(all_files, "_DST_")) & !str_detect(all_files, "_0_")]
+half <- all_files[(str_detect(all_files, "_HALF_") | 
+                    str_detect(all_files, "_QB_") |
+                    str_detect(all_files, "_K_") |
+                    str_detect(all_files, "_DST_")) & !str_detect(all_files, "_0_")]
+
+qb.rank.list <- list()
+rb.rank.list <- list()
+wr.rank.list <- list()
+flex.rank.list <- list()
+te.rank.list <- list()
+k.rank.list <- list()
+dst.rank.list <- list()
+
+# only doing standard ranks here
+for (file in std) {
+  # get the name of the ranking site
+  source.name <- str_split(file, "_") %>% 
+    map_chr(~ .x[3])
+  
+  # get the position being ranked
+  pos <- str_split(file, "_") %>% 
+    map_chr(~ .x[4])
+  
+  # read the file
+  df <- read_csv(paste0(path, file), col_types=cols())
+  
+  # remove any columns that are completely NA
+  df <- df[,colSums(is.na(df)) < nrow(df)]
+  
+  # only continue if there are expert rankings for this position from this source
+  if (ncol(df) >= 4) {
+    # rename the columns to include the source
+    colnames(df)[4:ncol(df)] %<>%
+      paste(source.name, sep="_")
+    
+    # get each expert's rankings and put them in a list
+    tmp <- list()
+    experts <- colnames(df)[4:ncol(df)]
+    for (expert in experts) {
+      tmp %<>% list.append(player_ranks(pull(df, expert), df$Player))
+    }
+    names(tmp) <- experts %>% 
+      # in case there's a duplicate "Staff Composite" column in the expert list, remove the ".1"
+      str_replace(".1", "")  
+    
+    # add the rankings to the appropriate list
+    if (pos == "QB") { qb.rank.list <- c(qb.rank.list, tmp) }
+    else if (pos == "RB") { rb.rank.list <- c(rb.rank.list, tmp) }
+    else if (pos == "WR") { wr.rank.list <- c(wr.rank.list, tmp) }
+    else if (pos == "TE") { te.rank.list <- c(te.rank.list, tmp) }
+    else if (pos == "FLX") { flex.rank.list <- c(flex.rank.list, tmp) }
+    else if (pos == "K") { k.rank.list <- c(k.rank.list, tmp) }
+    else if (pos == "DST") { dst.rank.list <- c(dst.rank.list, tmp) }
+  }
+}
+```
+
+```{r}
+expert.dir <- paste0("./experts/", year, "/")
+expert.file <- paste0(expert.dir, year, "_expert_list_week", week, ".csv")
+expert_df <- read_csv(expert.file, col_types=cols()) %>% 
+  mutate_at("checked", as.logical)
+
+checked_expert_df <- expert_df %>% 
+  filter(checked)
+
+all_fp_experts  <- with(expert_df, paste(Expert, Site, sep="_"))
+checked_experts <- with(checked_expert_df, paste(Expert, Site, sep="_"))
+
+all.qb.rank.list <- qb.rank.list[names(qb.rank.list) %in% all_fp_experts]
+all.rb.rank.list <- rb.rank.list[names(rb.rank.list) %in% all_fp_experts]
+all.wr.rank.list <- wr.rank.list[names(wr.rank.list) %in% all_fp_experts]
+all.te.rank.list <- te.rank.list[names(te.rank.list) %in% all_fp_experts]
+all.flex.rank.list <- flex.rank.list[names(flex.rank.list) %in% all_fp_experts]
+all.k.rank.list <- k.rank.list[names(k.rank.list) %in% all_fp_experts]
+all.dst.rank.list <- dst.rank.list[names(dst.rank.list) %in% all_fp_experts]
+checked.qb.rank.list <- qb.rank.list[names(qb.rank.list) %in% checked_experts]
+checked.rb.rank.list <- rb.rank.list[names(rb.rank.list) %in% checked_experts]
+checked.wr.rank.list <- wr.rank.list[names(wr.rank.list) %in% checked_experts]
+checked.te.rank.list <- te.rank.list[names(te.rank.list) %in% checked_experts]
+checked.flex.rank.list <- flex.rank.list[names(flex.rank.list) %in% checked_experts]
+checked.k.rank.list <- k.rank.list[names(k.rank.list) %in% checked_experts]
+checked.dst.rank.list <- dst.rank.list[names(dst.rank.list) %in% checked_experts]
+```
+
+```{r}
+tic()
+tic()
+print("QB...")
+checked.MC.qb <- MC(checked.qb.rank.list)
+toc()
+tic()
+print("RB...")
+checked.MC.rb <- MC(checked.rb.rank.list)
+toc()
+tic()
+print("WR...")
+checked.MC.wr <- MC(checked.wr.rank.list)
+toc()
+tic()
+print("TE...")
+checked.MC.te <- MC(checked.te.rank.list)
+toc()
+tic()
+print("FLEX...")
+checked.MC.flex <- MC(checked.flex.rank.list)
+toc()
+tic()
+print("K...")
+checked.MC.k <- MC(checked.k.rank.list)
+toc()
+tic()
+print("DST...")
+checked.MC.dst <- MC(checked.dst.rank.list)
+toc()
+print("Total:")
+toc()
+```
+
+```{r}
+fp_consensus.qb <- read_csv(paste0(path, "2018_0_FantasyPros consensus_QB_STD_week", week, ".csv"),
+                         col_types=cols())
+fp_consensus.rb <- read_csv(paste0(path, "2018_0_FantasyPros consensus_RB_STD_week", week, ".csv"),
+                         col_types=cols())
+fp_consensus.wr <- read_csv(paste0(path, "2018_0_FantasyPros consensus_WR_STD_week", week, ".csv"),
+                         col_types=cols())
+fp_consensus.te <- read_csv(paste0(path, "2018_0_FantasyPros consensus_TE_STD_week", week, ".csv"),
+                         col_types=cols())
+fp_consensus.flex <- read_csv(paste0(path, "2018_0_FantasyPros consensus_FLX_STD_week", week, ".csv"),
+                         col_types=cols())
+fp_consensus.k <- read_csv(paste0(path, "2018_0_FantasyPros consensus_K_STD_week", week, ".csv"),
+                         col_types=cols())
+fp_consensus.dst <- read_csv(paste0(path, "2018_0_FantasyPros consensus_DST_STD_week", week, ".csv"),
+                         col_types=cols())
+
+checked.df.qb <- data.frame(Player=checked.MC.qb$MC3.TopK) %>% 
+  mutate_at("Player", as.character) %>% 
+  left_join(fp_consensus.qb, by="Player")
+checked.df.rb <- data.frame(Player=checked.MC.rb$MC3.TopK) %>% 
+  mutate_at("Player", as.character) %>% 
+  left_join(fp_consensus.rb, by="Player")
+checked.df.wr <- data.frame(Player=checked.MC.wr$MC3.TopK) %>% 
+  mutate_at("Player", as.character) %>% 
+  left_join(fp_consensus.wr, by="Player")
+checked.df.te <- data.frame(Player=checked.MC.te$MC3.TopK) %>% 
+  mutate_at("Player", as.character) %>% 
+  left_join(fp_consensus.te, by="Player")
+checked.df.flex <- data.frame(Player=checked.MC.flex$MC3.TopK) %>% 
+  mutate_at("Player", as.character) %>% 
+  left_join(fp_consensus.flex, by="Player")
+checked.df.k <- data.frame(Player=checked.MC.k$MC3.TopK) %>% 
+  mutate_at("Player", as.character) %>% 
+  left_join(fp_consensus.k, by="Player")
+checked.df.dst <- data.frame(Player=checked.MC.dst$MC3.TopK) %>% 
+  mutate_at("Player", as.character) %>% 
+  left_join(fp_consensus.dst, by="Player")
+
+checked.df.qb <- checked.df.qb %>% 
+  mutate(Rank = 1:n()) %>% 
+  rename(FP_Rank = `Staff Composite`) %>% 
+  mutate(diff = Rank - FP_Rank) %>% 
+  select(Rank, Player, Team, FP_Rank, diff)
+checked.df.rb <- checked.df.rb %>% 
+  mutate(Rank = 1:n()) %>% 
+  rename(FP_Rank = `Staff Composite`) %>% 
+  mutate(diff = Rank - FP_Rank) %>% 
+  select(Rank, Player, Team, FP_Rank, diff)
+checked.df.wr <- checked.df.wr %>% 
+  mutate(Rank = 1:n()) %>% 
+  rename(FP_Rank = `Staff Composite`) %>% 
+  mutate(diff = Rank - FP_Rank) %>% 
+  select(Rank, Player, Team, FP_Rank, diff)
+checked.df.te <- checked.df.te %>% 
+  mutate(Rank = 1:n()) %>% 
+  rename(FP_Rank = `Staff Composite`) %>% 
+  mutate(diff = Rank - FP_Rank) %>% 
+  select(Rank, Player, Team, FP_Rank, diff)
+checked.df.flex <- checked.df.flex %>% 
+  mutate(Rank = 1:n()) %>% 
+  rename(FP_Rank = `Staff Composite`) %>% 
+  mutate(diff = Rank - FP_Rank) %>% 
+  select(Rank, Player, Team, FP_Rank, diff)
+checked.df.k <- checked.df.k %>% 
+  mutate(Rank = 1:n()) %>% 
+  rename(FP_Rank = `Staff Composite`) %>% 
+  mutate(diff = Rank - FP_Rank) %>% 
+  select(Rank, Player, Team, FP_Rank, diff)
+checked.df.dst <- checked.df.dst %>% 
+  mutate(Rank = 1:n()) %>% 
+  rename(FP_Rank = `Staff Composite`) %>% 
+  mutate(diff = Rank - FP_Rank) %>% 
+  select(Rank, Player, Team, FP_Rank, diff)
+  
+dir <- paste0("./aggregation/2018/week", week, "/")
+if (!dir.exists(dir)) { dir.create(dir) }
+write_csv(checked.df.qb, paste0(dir,"checked_experts_week", week, "_QB.csv"))
+write_csv(checked.df.rb, paste0(dir,"checked_experts_week", week, "_RB.csv"))
+write_csv(checked.df.wr, paste0(dir,"checked_experts_week", week, "_WR.csv"))
+write_csv(checked.df.te, paste0(dir,"checked_experts_week", week, "_TE.csv"))
+write_csv(checked.df.flex, paste0(dir,"checked_experts_week", week, "_FLX.csv"))
+write_csv(checked.df.k, paste0(dir,"checked_experts_week", week, "_K.csv"))
+write_csv(checked.df.dst, paste0(dir,"checked_experts_week", week, "_DST.csv"))
+```
+
+## optimize TopKLists MC function
+
+```{r}
+my.trans.matrix <- function(input, space=NULL) {
+  if (is.null(space) == TRUE) {
+    common = sort(unique(unlist(input)))
+    space = vector("list", length(input))
+    for (i in 1:length(input)) space[[i]] = common
+  }
+  
+  nList = length(input)
+  e.Topk = space
+  for (l in 1:nList) {
+    n = length(input[[l]])
+    e.Topkl = rep(n + 1, length(space[[l]]))
+    e.Topkl[match(input[[l]], space[[l]])] = 1:n
+    e.Topk[[l]] = e.Topkl
+  }
+  L = unique(unlist(input))
+  N = length(L)
+  # MC1 = MC2 = MC3 = matrix(0, nrow = N, ncol = N)
+  MC3 = matrix(0, nrow = N, ncol = N)
+  lookup = matrix(c(rep(L, rep(N, N)), rep(L, N)), ncol = 2)
+  lookup = lookup[lookup[, 1] != lookup[, 2], ]
+  for (i in 1:(nrow(lookup))) {
+    a = lookup[i, 1]
+    b = lookup[i, 2]
+    found = 0
+    nn = 0
+    for (l in 1:nList) {
+      found = found + (a %in% space[[l]]) * (b %in% space[[l]])
+      nn = nn + sum(e.Topk[[l]][match(a, space[[l]])] > 
+        e.Topk[[l]][match(b, space[[l]])], na.rm = TRUE)
+    }
+    index1 = match(a, L)
+    index2 = match(b, L)
+    # MC1[index1, index2] = ceiling(nn/(found * (found != 
+    #   0) + (found + 1) * (found == 0)) * (found != 0)) + 
+    #   0.5 * (found == 0)
+    # MC2[index1, index2] = floor(nn/(found * (found != 0) + 
+    #   (found + 1) * (found == 0)) + 0.5) * (found != 0) + 
+    #   0.5 * (found == 0)
+    MC3[index1, index2] = nn/(found * (found != 0) + (found + 
+      1) * (found == 0)) * (found != 0) + 0.5 * (found == 
+      0)
+  }
+  # MC1 = MC1/N
+  # MC2 = MC2/N
+  MC3 = MC3/N
+  for (i in 1:N) {
+    # MC1[i, i] = 1 - sum(MC1[i, -i])
+    # MC2[i, i] = 1 - sum(MC2[i, -i])
+    MC3[i, i] = 1 - sum(MC3[i, -i])
+  }
+  # return(list(L, MC1, MC2, MC3))
+  return(list(L, MC3))
+}
+
+my.MC <- function(input, space=NULL, k=NULL, a=0.15, delta=10^-15) {
+  if (missing(input)) 
+    stop("You need to input the top-k lists to be aggregated")
+  if (is.null(space) == TRUE) {
+    common = sort(unique(unlist(input)))
+    space = vector("list", length(input))
+    for (i in 1:length(input)) space[[i]] = common
+  }
+  out.trans = my.trans.matrix(input, space)
+  N = length(out.trans[[1]])
+  # MC1 = MC.ranks(out.trans[[1]], out.trans[[2]], a, delta)
+  # MC2 = MC.ranks(out.trans[[1]], out.trans[[3]], a, delta)
+  # MC3 = MC.ranks(out.trans[[1]], out.trans[[4]], a, delta)
+  MC3 = MC.ranks(out.trans[[1]], out.trans[[2]], a, delta)
+  if (is.null(k) == TRUE) 
+    k = N
+  else {
+    if (k > N) 
+      k = N
+  }
+  # results = list(MC1[[3]][1:k], MC1[[2]], MC2[[3]][1:k], MC2[[2]], 
+  #   MC3[[3]][1:k], MC3[[2]])
+  results = list(MC3[[3]][1:k], MC3[[2]])
+  # names(results) = c("MC1.TopK", "MC1.Prob", "MC2.TopK", "MC2.Prob", 
+  #   "MC3.TopK", "MC3.Prob")
+  names(results) = c("MC3.TopK", "MC3.Prob")
+  return(results)
+}
+```
