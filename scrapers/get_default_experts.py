@@ -4,24 +4,34 @@ import os
 from scrapers.utils import *
 
 
-def get_draft_experts():
+# Note: these are being scraped from FantasyPros, so we can't get data for past weeks
+
+def get_draft_experts(directory=None, verbose=False):
+    year = get_current_season()
+
+    if directory is None:
+        directory = "./experts/" + str(year)
+
     url = "https://www.fantasypros.com/nfl/rankings/consensus-cheatsheets.php"
     df = get_expert_list(url)
 
-    year = get_current_season()
     filename = str(year) + "_expert_list_draft.csv"
-    write_expert_list(df, filename=filename)
+    write_expert_list(df, filename=filename, directory=directory, verbose=verbose)
 
 
-def get_weekly_experts():
+def get_weekly_experts(directory=None, verbose=False):
+    year = get_current_season()
+    week = get_latest_week()
+
+    if directory is None:
+        directory = "./experts/" + str(year)
+
     # I'm making the lazy assumption that the default FantasyPros experts are the same for each position
     url = "https://www.fantasypros.com/nfl/rankings/qb.php"
     df = get_expert_list(url)
 
-    year = get_current_season()
-    week = get_latest_week()
     filename = str(year) + "_expert_list_week" + str(week) + ".csv"
-    write_expert_list(df, filename=filename)
+    write_expert_list(df, filename=filename, directory=directory, verbose=verbose)
 
 
 def get_expert_list(url):
@@ -53,7 +63,8 @@ def get_expert_list(url):
     return df
 
 
-def write_expert_list(df, filename, directory="experts/"):
+def write_expert_list(df, filename, directory, verbose=False):
+
     if filename[-4:] != ".csv":
         filename += ".csv"
 
@@ -61,4 +72,7 @@ def write_expert_list(df, filename, directory="experts/"):
     filename = directory + filename
     os.makedirs(os.path.dirname(filename), exist_ok=True)
 
-    df.to_csv(filename)
+    if verbose:
+        print("Writing " + filename)
+
+    df.to_csv(filename, index=False)

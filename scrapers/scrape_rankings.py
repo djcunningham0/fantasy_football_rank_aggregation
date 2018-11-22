@@ -4,26 +4,31 @@ import pandas as pd
 from scrapers.utils import *
 
 
-def update_draft_and_current_week(verbose=False):
+def update_draft_and_current_week(year=None, week=None, verbose=False):
     """
     Scrape pre-draft and weekly rankings (current week) and write the results to CSV files.
+    Write to default directories.
     """
-    scrape_draft_rankings(verbose=verbose)
-    scrape_weekly_rankings(verbose=verbose)
+    scrape_draft_rankings(verbose=verbose, year=year)
+    scrape_weekly_rankings(verbose=verbose, year=year, week=week)
 
     if verbose:
         print("Done.")
 
 
-def scrape_draft_rankings(year=None, directory="rankings/draft/", verbose=False):
+def scrape_draft_rankings(year=None, directory=None, verbose=False):
     """
     Scrape pre-draft rankings from all FantasyPros sources and write the results to CSV files.
 
     :param year: year of the season to scrape rankings for (defaults to current season)
     :param directory: directory to write CSV files to (will be created if it doesn't exist)
+    :param verbose: True to print messages when writing files
     """
     if year is None:
         year = get_current_season()
+
+    if directory is None:
+        directory = "./rankings/" + str(year) + "/draft/"
 
     directory = fix_directory_name(directory)
 
@@ -32,11 +37,11 @@ def scrape_draft_rankings(year=None, directory="rankings/draft/", verbose=False)
             df = do_scrape(source=source, year=year, week=0, pos="ALL", scoring=scoring)
 
             # only continue if this source actually has rankings (and get the fantasypros consensus once)
-            if ('Unnamed: 4' not in df.columns) or (source == 0):
+            if df is not None and (('Unnamed: 4' not in df.columns) or (source == 0)):
                 write_df(df, directory, verbose=verbose)
 
 
-def scrape_weekly_rankings(year=None, week=None, directory="rankings/weekly/", verbose=False):
+def scrape_weekly_rankings(year=None, week=None, directory=None, verbose=False):
     """
     Scrape weekly rankings from all FantasyPros sources and write the results to CSV files.
 
@@ -51,6 +56,9 @@ def scrape_weekly_rankings(year=None, week=None, directory="rankings/weekly/", v
     if week is None:
         week = get_latest_week(year=year)
 
+    if directory is None:
+        directory = "./rankings/" + str(year) + "/weekly/"
+
     if week < 1:
         if verbose:
             print("Use scrape_draft_rankings for pre-draft rankings.")
@@ -63,7 +71,7 @@ def scrape_weekly_rankings(year=None, week=None, directory="rankings/weekly/", v
         df = do_scrape(source=source, year=year, week=week, pos="QB", scoring="STD")
 
         # if only three columns (Staff Composite, Player, Team), there are no expert ranks from this source
-        if len(df.columns) == 3 and source != 0:
+        if df is None or (len(df.columns) == 3 and source != 0):
             continue
 
         # if we made it this far, write the QB ranks to a file
@@ -79,7 +87,8 @@ def scrape_weekly_rankings(year=None, week=None, directory="rankings/weekly/", v
 
             for scoring in scoring_opts:
                 df = do_scrape(source=source, year=year, week=week, pos=pos, scoring=scoring)
-                write_df(df, directory, verbose=verbose)
+                if df is not None:
+                    write_df(df, directory, verbose=verbose)
 
 
 def do_scrape(source, year, week, pos, scoring):
@@ -106,6 +115,8 @@ def do_scrape(source, year, week, pos, scoring):
           + "&ajax=true&export=xls"
 
     soup = get_soup(url)
+    if soup is None:
+        return None
 
     # get the source name
     if source == 0:
@@ -152,6 +163,7 @@ def write_df(df, directory, verbose=False):
     if week == 0:
         week_str = "draft"
     else:
+        # add week to the directory path
         week_str = "week" + str(week)
         directory += week_str + "/"
 
@@ -161,4 +173,4 @@ def write_df(df, directory, verbose=False):
     if verbose:
         print("writing " + filename)
 
-    df.to_csv(filename)
+    df.to_csv(filename, index=False)

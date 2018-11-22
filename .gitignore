@@ -3,7 +3,10 @@
 .RData
 .Ruserdata
 .DS_Store
-/rankings/
 test.py
 .idea/
 tmp.R
+__pycache__/
+rankings/
+experts/
+aggregation/
