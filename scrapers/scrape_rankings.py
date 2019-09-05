@@ -33,12 +33,23 @@ def scrape_draft_rankings(year=None, directory=None, verbose=False):
     directory = fix_directory_name(directory)
 
     for scoring in ['STD', 'PPR', 'HALF']:
-        for source in range(700):  # TODO: refine this range
-            df = do_scrape(source=source, year=year, week=0, pos="ALL", scoring=scoring)
+        for source in range(1000):  # TODO: refine this range
+            try:
+                df = do_scrape(source=source, year=year, week=0, pos="ALL", scoring=scoring)
 
-            # only continue if this source actually has rankings (and get the fantasypros consensus once)
-            if df is not None and (('Unnamed: 4' not in df.columns) or (source == 0)):
-                write_df(df, directory, verbose=verbose)
+                # only continue if this source actually has rankings (and get the fantasypros consensus once)
+                if df is not None and (('Unnamed: 4' not in df.columns) or (source == 0)):
+                    write_df(df, directory, verbose=verbose)
+
+            except pd.errors.EmptyDataError as e:
+                print(f'Error with {source}: {repr(e)}')
+                print('Trying again')
+                # try a second time if we get an empty data error
+                df = do_scrape(source=source, year=year, week=0, pos="ALL", scoring=scoring)
+
+                # only continue if this source actually has rankings (and get the fantasypros consensus once)
+                if df is not None and (('Unnamed: 4' not in df.columns) or (source == 0)):
+                    write_df(df, directory, verbose=verbose)
 
 
 def scrape_weekly_rankings(year=None, week=None, directory=None, verbose=False):
@@ -102,6 +113,7 @@ def do_scrape(source, year, week, pos, scoring):
     :param scoring: the scoring format to scrape rankings for ("STD", "PPR", or "HALF")
     :return: a Pandas DataFrame
     """
+    # TODO: pass parameters in as payload (https://2.python-requests.org/en/master/user/quickstart/#passing-parameters-in-urls)
     url = "https://partners.fantasypros.com/external/widget/nfl-staff-rankings.php?source=" \
           + str(source) \
           + "&year=" \
@@ -131,7 +143,7 @@ def do_scrape(source, year, week, pos, scoring):
     data = StringIO('\n'.join(table))
 
     # read into a DataFrame
-    df = pd.read_table(data)
+    df = pd.read_table(data)  # TODO: change this to read_csv
 
     # set some attributes on the DataFrame
     df.__setattr__("source", source)
@@ -144,7 +156,7 @@ def do_scrape(source, year, week, pos, scoring):
     return df
 
 
-def write_df(df, directory, verbose=False):
+def write_df(df, directory, verbose=False, error_count=0):
     """
     Write the scraped rankings (in a Pandas DataFrame) to a CSV file.
 

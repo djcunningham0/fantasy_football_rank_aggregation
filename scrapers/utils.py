@@ -12,7 +12,7 @@ def get_soup(url, headers=None, verbose=True):
     result = requests.get(url, headers=headers)
     if result.status_code != 200:
         if verbose:
-            print("Failed to connect to {} with error code: {}".format(url, result.status_code))
+            print(f'Failed to connect to {url} with error code: {result.status_code}')
         return None
     else:
         soup = bs(result.content, 'html5lib')
@@ -65,7 +65,7 @@ def get_latest_week(year=None, max_week=17):
     return week
 
 
-def fix_directory_name(directory):
+def fix_directory_name(directory):  # TODO: replace occurences of this with os.path.join
     """
     Add a backslash the end of the directory name if it doesn't already have one.
     """

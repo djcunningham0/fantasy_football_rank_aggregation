@@ -1,7 +1,7 @@
 import pandas as pd
 from datetime import datetime as dt
 import os
-from scrapers.utils import *
+from scrapers.utils import *  # TODO: don't import *
 
 
 # Note: these are being scraped from FantasyPros, so we can't get data for past weeks
@@ -12,11 +12,17 @@ def get_draft_experts(directory=None, verbose=False):
     if directory is None:
         directory = "./experts/" + str(year)
 
-    url = "https://www.fantasypros.com/nfl/rankings/consensus-cheatsheets.php"
-    df = get_expert_list(url)
+    std_df = get_expert_list("https://www.fantasypros.com/nfl/rankings/consensus-cheatsheets.php")
+    half_df = get_expert_list("https://www.fantasypros.com/nfl/rankings/half-point-ppr-cheatsheets.php")
+    ppr_df = get_expert_list("https://www.fantasypros.com/nfl/rankings/ppr-cheatsheets.php")
 
-    filename = str(year) + "_expert_list_draft.csv"
-    write_expert_list(df, filename=filename, directory=directory, verbose=verbose)
+    std_file = f'{str(year)}_expert_list_draft_STD.csv'
+    half_file = f'{str(year)}_expert_list_draft_HALF.csv'
+    ppr_file = f'{str(year)}_expert_list_draft_PPR.csv'
+
+    write_expert_list(std_df, filename=std_file, directory=directory, verbose=verbose)
+    write_expert_list(half_df, filename=half_file, directory=directory, verbose=verbose)
+    write_expert_list(ppr_df, filename=ppr_file, directory=directory, verbose=verbose)
 
 
 def get_weekly_experts(directory=None, verbose=False):
@@ -27,19 +33,31 @@ def get_weekly_experts(directory=None, verbose=False):
         directory = "./experts/" + str(year)
 
     # I'm making the lazy assumption that the default FantasyPros experts are the same for each position
-    url = "https://www.fantasypros.com/nfl/rankings/qb.php"
-    df = get_expert_list(url)
+    # TODO: don't make this lazy assumption
+    url_dict = {
+        'STD': 'https://www.fantasypros.com/nfl/rankings/',
+        'HALF': 'https://www.fantasypros.com/nfl/rankings/half-point-ppr-',
+        'PPR': 'https://www.fantasypros.com/nfl/rankings/ppr-'
+    }
+    for pos in ['qb', 'rb', 'wr', 'te', 'flex', 'qb-flex', 'dst', 'k']:
+        # scoring options depend on whether position is affected by PPR
+        if pos in ['qb', 'dst', 'k']:
+            scoring_opts = ['STD']
+        else:
+            scoring_opts = ['STD', 'PPR', 'HALF']
 
-    filename = str(year) + "_expert_list_week" + str(week) + ".csv"
-    write_expert_list(df, filename=filename, directory=directory, verbose=verbose)
+        for scoring in scoring_opts:
+            url = f'{url_dict[scoring]}{pos}.php'  # e.g., https://www.fantasypros.com/nfl/rankings/ppr-rb.php
+            df = get_expert_list(url)
+
+            filename = f'{str(year)}_expert_list_week{str(week)}_{pos.upper()}_{scoring}.csv'
+            write_expert_list(df, filename=filename, directory=directory, verbose=verbose)
 
 
 def get_expert_list(url):
 
     expert_list = []
-
     soup = get_soup(url)
-
     tr = soup.find_all("tr")
 
     for row in tr:
